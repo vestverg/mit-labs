@@ -2,6 +2,7 @@ package mapreduce
 
 import (
 	"fmt"
+	"sync"
 )
 
 //
@@ -32,4 +33,55 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// Your code here (Part III, Part IV).
 	//
+	gr := sync.WaitGroup{}
+	gr.Add(ntasks)
+	for i := 0; i < ntasks; i++ {
+		j := i
+		job := NewJob(mapFiles[i], jobName, j)
+		go submitJob(job, registerChan, phase, n_other, &gr)
+	}
+	gr.Wait()
+	fmt.Printf("Schedule: %v done\n", phase)
+}
+
+func NewJob(file string, jobName string, number int) Job {
+	return Job{
+		name:   jobName,
+		number: number,
+		file:   file,
+	}
+}
+
+func submitJob(job Job, workers chan string, phase jobPhase, n_other int, wg *sync.WaitGroup) {
+	complete := make(chan bool)
+	defer wg.Done()
+	for {
+		select {
+		case worker := <-workers:
+			if call(worker, "Worker.DoTask", DoTaskArgs{
+				JobName:       job.name,
+				File:          job.file,
+				Phase:         phase,
+				TaskNumber:    job.number,
+				NumOtherPhase: n_other,
+			}, new(struct{})) {
+				complete <- true
+				go func() { workers <- worker }()
+			} else {
+				fmt.Println(job.file + " " + "fail, reschedule")
+				go func() { workers <- worker }()
+			}
+		case done := <-complete:
+			if done {
+				return
+			}
+			//waiting job
+		}
+	}
+}
+
+type Job struct {
+	name   string
+	number int
+	file   string
 }
